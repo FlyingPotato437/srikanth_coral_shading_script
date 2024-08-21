@@ -362,8 +362,8 @@ def write_output(results, output_file):
                     f"{result['calculation_time']:.2f}"
                 ])
             
-def visualize_mesh_with_polygons(mesh, projected_polygons, opacity=1.0):
-    print("Displaying 3D model with projected polygons")
+def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=0, opacity=1.0):
+    print("Displaying 3D model with projected polygons and expanded bounding boxes")
     print("1. Use the mouse to rotate, zoom, and pan the view.")
     print("2. Press 'q' to close the window and continue processing.")
 
@@ -383,7 +383,7 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, opacity=1.0):
         print(f"No color data found. Displaying mesh with default color and opacity {opacity}...")
         plotter.add_mesh(mesh, opacity=opacity, show_edges=False, smooth_shading=True)
 
-    # Add projected polygons
+    # Add projected polygons and their bounding boxes
     for poly_id, points in projected_polygons:
         poly_points = np.array(points)
         if len(poly_points) > 1:  # Ensure we have at least two points to create a line
@@ -396,16 +396,71 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, opacity=1.0):
             line = np.insert(line, 0, len(closed_poly_points))  # Insert the length at the beginning
             poly_line.lines = line
             
-            plotter.add_mesh(poly_line, color='red', line_width=2, render_lines_as_tubes=True)
+            plotter.add_mesh(poly_line, color='red', line_width=2, render_lines_as_tubes=True, label='Polygon')
+
+            # Calculate and add expanded bounding box
+            box_min, box_max = calculate_expanded_bounding_box(poly_points, expansion_percentage)
+            box = pv.Box(bounds=(box_min[0], box_max[0], box_min[1], box_max[1], box_min[2], box_max[2]))
+            plotter.add_mesh(box, color='blue', style='wireframe', opacity=0.5, line_width=2, label='Expanded Bounding Box')
+
+    # Add a legend
+    plotter.add_legend()
 
     # Reset camera to focus on the mesh
     plotter.reset_camera()
 
     print("Showing plotter...")
+    plotter.add_text("Press 'q' to close the window and continue processing.", position='upper_left')
     plotter.show()
 
+def calculate_expanded_bounding_box(points, expansion_percentage):
+    """Calculate an expanded bounding box for a set of points."""
+    min_coords = np.min(points, axis=0)
+    max_coords = np.max(points, axis=0)
+    
+    # Calculate the current size and center
+    size = max_coords - min_coords
+    center = (min_coords + max_coords) / 2
+    
+    # Calculate the expanded size
+    expanded_size = size * (1 + expansion_percentage / 100)
+    
+    # Calculate the new min and max coordinates
+    expanded_min = center - expanded_size / 2
+    expanded_max = center + expanded_size / 2
+    
+    return expanded_min, expanded_max
 
-def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=None, box_size=None):
+import numpy as np
+import pyvista as pv
+import os
+import time
+from tqdm import tqdm
+import geopandas as gpd
+import multiprocessing as mp
+import csv 
+from functools import partial
+import scipy.spatial
+
+def calculate_expanded_bounding_box(points, expansion_percentage):
+    """Calculate an expanded bounding box for a set of points."""
+    min_coords = np.min(points, axis=0)
+    max_coords = np.max(points, axis=0)
+    
+    # Calculate the current size and center
+    size = max_coords - min_coords
+    center = (min_coords + max_coords) / 2
+    
+    # Calculate the expanded size
+    expanded_size = size * (1 + expansion_percentage / 100)
+    
+    # Calculate the new min and max coordinates
+    expanded_min = center - expanded_size / 2
+    expanded_max = center + expanded_size / 2
+    
+    return expanded_min, expanded_max
+
+def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=None, expansion_percentage=0):
     mesh_path, plot_name = plot_info
     
     if not os.path.exists(mesh_path):
@@ -431,23 +486,37 @@ def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=N
         point_of_interest, window_size = interactive_bounding_box(mesh)
         print(f"Selected point of interest: {point_of_interest}")
         print(f"Selected window size: {window_size}")
+        shaded_percentage = calculate_structure_shading(mesh, light_dir, point_of_interest, window_size, cpu_limit=cpu_limit)
+        return {
+            'plot_name': plot_name,
+            'shaded_percentage': shaded_percentage,
+            'illuminated_percentage': 100 - shaded_percentage,
+            'calculation_time': time.time() - start_time
+        }
     elif shapefile_path and os.path.exists(shapefile_path):
         print("\nLoading and projecting polygons...")
         projected_polygons = load_and_project_polygons(shapefile_path, mesh)
-        visualize_mesh_with_polygons(mesh, projected_polygons)
+        visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage)
         
         print("Calculating shading for each polygon...")
         polygon_results = []
         for poly_id, points in projected_polygons:
             print(f"Processing polygon {poly_id}")
-            center = np.mean(points, axis=0)
-            window_size = np.array([box_size, box_size, box_size])
+            
+            # Calculate the expanded bounding box
+            box_min, box_max = calculate_expanded_bounding_box(points, expansion_percentage)
+            center = (box_min + box_max) / 2
+            window_size = box_max - box_min
+            
             shaded_percentage = calculate_structure_shading(mesh, light_dir, center, window_size, cpu_limit=cpu_limit)
             polygon_results.append({
                 'polygon_id': poly_id,
                 'center_x': center[0],
                 'center_y': center[1],
                 'center_z': center[2],
+                'box_size_x': window_size[0],
+                'box_size_y': window_size[1],
+                'box_size_z': window_size[2],
                 'shaded_percentage': shaded_percentage,
                 'illuminated_percentage': 100 - shaded_percentage
             })
@@ -456,12 +525,12 @@ def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=N
         avg_shaded = np.mean([r['shaded_percentage'] for r in polygon_results])
         print(f'\nAverage Shaded Percentage: {avg_shaded:.2f}%')
         print(f'Average Illuminated Percentage: {100 - avg_shaded:.2f}%')
-        shaded_percentage = avg_shaded
+        
         return {
             'plot_name': plot_name,
             'polygon_results': polygon_results,
-            'shaded_percentage': shaded_percentage,
-            'illuminated_percentage': 100 - shaded_percentage,
+            'shaded_percentage': avg_shaded,
+            'illuminated_percentage': 100 - avg_shaded,
             'calculation_time': time.time() - start_time
         }
     else:
@@ -566,7 +635,7 @@ def calculate_polygon_shading(mesh, light_dir, center_points, box_size, cpu_limi
     return results
 
 
-def main(use_bounding_box=True, use_shapefile=False, cpu_limit=5, box_size=1):
+def main(use_bounding_box=False, use_shapefile=True, cpu_limit=5, expansion_percentage=20):
     # Directory containing the 3D model files
     model_directory = '/Users/srikanthsamy1/Desktop/AIMS/testply'
     
@@ -594,7 +663,7 @@ def main(use_bounding_box=True, use_shapefile=False, cpu_limit=5, box_size=1):
                 print(f"Shapefile not found: {shapefile_path}")
                 shapefile_path = None
 
-        result = process_single_plot((mesh_path, plot_name), use_bounding_box, cpu_limit, shapefile_path, box_size)
+        result = process_single_plot((mesh_path, plot_name), use_bounding_box, cpu_limit, shapefile_path, expansion_percentage)
         if result:
             results.append(result)
 
@@ -607,8 +676,8 @@ def main(use_bounding_box=True, use_shapefile=False, cpu_limit=5, box_size=1):
     print("All plots processed successfully.")
 
 if __name__ == "__main__":
-    use_bounding_box = False  # Set this to False to process the full model
-    use_shapefile = True  # Set this to True to use shapefile analysis
+    use_bounding_box = False  # Set to True for bounding box mode, False for shapefile mode
+    use_shapefile = True  # Set to True for shapefile mode, False for bounding box mode
     cpu_limit = 5
-    box_size = 1  # Size of the bounding box for shapefile analysis (in meters)
-    main(use_bounding_box, use_shapefile, cpu_limit, box_size)
+    expansion_percentage = 10  # Percentage to expand the bounding box in shapefile mode (e.g., 20 for 20% expansion)
+    main(use_bounding_box, use_shapefile, cpu_limit, expansion_percentage)
