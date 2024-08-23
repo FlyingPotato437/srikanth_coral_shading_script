@@ -398,7 +398,6 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
             
             plotter.add_mesh(poly_line, color='red', line_width=2, render_lines_as_tubes=True, label='Polygon')
 
-            # Calculate and add expanded bounding box
             box_min, box_max = calculate_expanded_bounding_box(poly_points, expansion_percentage)
             box = pv.Box(bounds=(box_min[0], box_max[0], box_min[1], box_max[1], box_min[2], box_max[2]))
             plotter.add_mesh(box, color='blue', style='wireframe', opacity=0.5, line_width=2, label='Expanded Bounding Box')
@@ -406,7 +405,6 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
     # Add a legend
     plotter.add_legend()
 
-    # Reset camera to focus on the mesh
     plotter.reset_camera()
 
     print("Showing plotter...")
@@ -431,19 +429,8 @@ def calculate_expanded_bounding_box(points, expansion_percentage):
     
     return expanded_min, expanded_max
 
-import numpy as np
-import pyvista as pv
-import os
-import time
-from tqdm import tqdm
-import geopandas as gpd
-import multiprocessing as mp
-import csv 
-from functools import partial
-import scipy.spatial
-
 def calculate_expanded_bounding_box(points, expansion_percentage):
-    """Calculate an expanded bounding box for a set of points."""
+    """calculate an expanded bounding box for a set of points."""
     min_coords = np.min(points, axis=0)
     max_coords = np.max(points, axis=0)
     
@@ -480,7 +467,7 @@ def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=N
     print(f"Number of points: {mesh.n_points}")
     print(f"Number of faces: {mesh.n_cells}")
 
-    light_dir = np.array([0, 0, -1])  # Negative z-direction for top-down light
+    light_dir = np.array([0, 0, -1])  # Negative z-direction for top-down light you can change this if you want
 
     if use_bounding_box:
         point_of_interest, window_size = interactive_bounding_box(mesh)
@@ -580,9 +567,8 @@ def load_and_project_polygons(shapefile_path, mesh):
     
     projected_polygons = []
     for _, row in gdf.iterrows():
-        # 'row' is a Series object representing a single row of the GeoDataFrame
-        # We access the 'TL_id' column's value for this row using the column name as a key
-        poly_id = row['TL_id']  # This is correct: it accesses the 'TL_id' column's value for this row
+        # We access the 'TL_id' column's value for this row using the column name as a key cuz this was what was in the shp file
+        poly_id = row['TL_id']  
         polygon = row['geometry']
         projected_points = []
         for point in polygon.exterior.coords:
@@ -656,7 +642,7 @@ def main(use_bounding_box=False, use_shapefile=True, cpu_limit=5, expansion_perc
 
         shapefile_path = None
         if use_shapefile:
-            # Assume shapefile has the same name as the mesh file but with .shp extension
+            # assuming shapefile has the same name as the mesh file but with .shp extension
             shapefile_name = f"{plot_name}.shp"
             shapefile_path = os.path.join(shapefile_directory, shapefile_name)
             if not os.path.exists(shapefile_path):
