@@ -48,15 +48,12 @@ def build_bvh(triangles, indices, start, end, depth=0, max_depth=20):
     if end - start <= 4 or depth == max_depth:  # Leaf node
         return node
 
-    # Choose longest axis to split
     axis = np.argmax(aabb_max - aabb_min)
     mid = (start + end) // 2
     
-    # Sort indices based on triangle centroids
     centroids = np.mean(triangles[indices[start:end]], axis=1)
     sorted_indices = indices[start:end][np.argsort(centroids[:, axis])]
     
-    # Update the original indices array
     indices[start:end] = sorted_indices
 
     node.left = build_bvh(triangles, indices, start, mid, depth + 1, max_depth)
@@ -234,16 +231,13 @@ def filter_triangles_with_bvh(bvh_root, box_min, box_max, triangles, indices):
         if node is None:
             return
         
-        # Check if the node's AABB intersects with the bounding box
         if not (np.any(node.aabb.max_bound < box_min) or np.any(node.aabb.min_bound > box_max)):
             if node.left is None and node.right is None:
-                # Leaf node: check individual triangles
                 for i in range(node.start, node.end):
                     triangle = triangles[indices[i]]
                     if triangle_intersects_box(triangle[0], triangle[1], triangle[2], box_min, box_max):
                         filtered_indices.append(indices[i])
             else:
-                # Internal node: recurse
                 traverse(node.left)
                 traverse(node.right)
     
@@ -255,7 +249,7 @@ def parallel_triangle_filtering_with_bvh(triangles, box_min, box_max, cpu_limit)
     
     print("Building BVH...")
     build_start = time.time()
-    indices = np.arange(len(triangles), dtype=np.int32)  # Ensure integer type
+    indices = np.arange(len(triangles), dtype=np.int32)  
     bvh_root = build_bvh(triangles, indices, 0, len(indices))
     build_time = time.time() - build_start
     print(f"BVH built in {build_time:.2f} seconds.")
@@ -369,11 +363,9 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
 
     plotter = pv.Plotter()
     
-    # Check if the mesh has color data
     if 'RGB' in mesh.array_names:
         print("Using original color data...")
         color_data = mesh['RGB']
-        # Normalize RGB values to 0-1 range if they're in 0-255 range
         if color_data.max() > 1:
             color_data = color_data / 255.0
         mesh['colors'] = color_data
@@ -383,17 +375,14 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
         print(f"No color data found. Displaying mesh with default color and opacity {opacity}...")
         plotter.add_mesh(mesh, opacity=opacity, show_edges=False, smooth_shading=True)
 
-    # Add projected polygons and their bounding boxes
     for poly_id, points in projected_polygons:
         poly_points = np.array(points)
-        if len(poly_points) > 1:  # Ensure we have at least two points to create a line
-            # Create a closed loop by adding the first point at the end
+        if len(poly_points) > 1:  
             closed_poly_points = np.vstack((poly_points, poly_points[0]))
             poly_line = pv.PolyData(closed_poly_points)
             
-            # Create line connectivity
             line = np.arange(len(closed_poly_points))
-            line = np.insert(line, 0, len(closed_poly_points))  # Insert the length at the beginning
+            line = np.insert(line, 0, len(closed_poly_points)) 
             poly_line.lines = line
             
             plotter.add_mesh(poly_line, color='red', line_width=2, render_lines_as_tubes=True, label='Polygon')
@@ -402,7 +391,6 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
             box = pv.Box(bounds=(box_min[0], box_max[0], box_min[1], box_max[1], box_min[2], box_max[2]))
             plotter.add_mesh(box, color='blue', style='wireframe', opacity=0.5, line_width=2, label='Expanded Bounding Box')
 
-    # Add a legend
     plotter.add_legend()
 
     plotter.reset_camera()
@@ -412,25 +400,23 @@ def visualize_mesh_with_polygons(mesh, projected_polygons, expansion_percentage=
     plotter.show()
 
 def calculate_expanded_bounding_box(points, expansion_percentage):
-    """Calculate an expanded bounding box for a set of points."""
     min_coords = np.min(points, axis=0)
     max_coords = np.max(points, axis=0)
     
-    # Calculate the current size and center
     size = max_coords - min_coords
     center = (min_coords + max_coords) / 2
     
-    # Calculate the expanded size
     expanded_size = size * (1 + expansion_percentage / 100)
     
-    # Calculate the new min and max coordinates
     expanded_min = center - expanded_size / 2
     expanded_max = center + expanded_size / 2
     
     return expanded_min, expanded_max
 
+  
+
 def calculate_expanded_bounding_box(points, expansion_percentage):
-    """calculate an expanded bounding box for a set of points."""
+    """Calculate an expanded bounding box for a set of points."""
     min_coords = np.min(points, axis=0)
     max_coords = np.max(points, axis=0)
     
@@ -467,7 +453,7 @@ def process_single_plot(plot_info, use_bounding_box, cpu_limit, shapefile_path=N
     print(f"Number of points: {mesh.n_points}")
     print(f"Number of faces: {mesh.n_cells}")
 
-    light_dir = np.array([0, 0, -1])  # Negative z-direction for top-down light you can change this if you want
+    light_dir = np.array([0, 0, -1])  # Negative z-direction for top-down light
 
     if use_bounding_box:
         point_of_interest, window_size = interactive_bounding_box(mesh)
@@ -567,14 +553,13 @@ def load_and_project_polygons(shapefile_path, mesh):
     
     projected_polygons = []
     for _, row in gdf.iterrows():
-        # We access the 'TL_id' column's value for this row using the column name as a key cuz this was what was in the shp file
+       
         poly_id = row['TL_id']  
         polygon = row['geometry']
         projected_points = []
         for point in polygon.exterior.coords:
-            x, y = point[:2]  # Extract x and y coordinates
+            x, y = point[:2] 
             
-            # Find the nearest point on the mesh surface
             _, index = kdtree.query([x, y])
             closest_point = points[index]
             
@@ -642,7 +627,7 @@ def main(use_bounding_box=False, use_shapefile=True, cpu_limit=5, expansion_perc
 
         shapefile_path = None
         if use_shapefile:
-            # assuming shapefile has the same name as the mesh file but with .shp extension
+           
             shapefile_name = f"{plot_name}.shp"
             shapefile_path = os.path.join(shapefile_directory, shapefile_name)
             if not os.path.exists(shapefile_path):
